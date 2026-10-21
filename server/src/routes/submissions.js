@@ -2,7 +2,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import { pool } from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
-import { evaluateHandwriting } from '../services/groq.js';
+import { evaluateHandwriting, gradeTranscription, transcribeHandwriting } from '../services/groq.js';
 import { asyncRoute, httpError } from '../utils.js';
 
 const router = Router();
@@ -13,6 +13,15 @@ function requireNumericId(value) {
     throw httpError(400, 'Invalid ID.');
   }
   return Number(value);
+}
+
+// Faculty may access only submissions they created. Administrators can access
+// every submission. Apply this check server-side to every submission resource.
+function assertSubmissionAccess(req, submittedBy) {
+  if (req.user.role !== 'admin' && Number(submittedBy) !== Number(req.user.id)) {
+    // Use 404 so unauthorized users cannot use IDs to discover other records.
+    throw httpError(404, 'Submission not found.');
+  }
 }
 
 // Images are stored in PostgreSQL as BYTEA, not on the server's local disk.
@@ -32,6 +41,11 @@ const upload = multer({
 router.get('/', asyncRoute(async (req, res) => {
   const values = [];
   const conditions = [];
+  // Never let a faculty-supplied query parameter widen their access.
+  if (req.user.role !== 'admin') {
+    values.push(req.user.id);
+    conditions.push(`s.submitted_by = $${values.length}`);
+  }
   if (req.query.bookId) {
     const bookId = Number(req.query.bookId);
     if (!Number.isInteger(bookId) || bookId < 1) throw httpError(400, 'Invalid book filter.');
@@ -116,8 +130,9 @@ router.post('/for-book/:bookId', upload.single('image'), asyncRoute(async (req, 
 
 router.get('/:id/image', asyncRoute(async (req, res) => {
   const { rows } = await pool.query(
-    'SELECT image_bytes, image_mime, image_filename FROM submissions WHERE id = $1', [requireNumericId(req.params.id)]);
+    'SELECT image_bytes, image_mime, image_filename, submitted_by FROM submissions WHERE id = $1', [requireNumericId(req.params.id)]);
   if (!rows[0]) throw httpError(404, 'Submission not found.');
+  assertSubmissionAccess(req, rows[0].submitted_by);
   // No public cache: student pages are private school records.
   res.set({
     'Content-Type': rows[0].image_mime,
@@ -135,41 +150,92 @@ router.get('/:id', asyncRoute(async (req, res) => {
        s.ai_score, s.ai_feedback, s.ai_criteria, s.final_score, s.final_feedback,
        s.final_criteria, s.status, s.created_at, s.updated_at, s.reviewed_at,
        b.title AS book_title, b.author AS book_author, u.name AS submitted_by_name,
-       reviewer.name AS reviewed_by_name
+       reviewer.name AS reviewed_by_name, s.submitted_by
      FROM submissions s JOIN books b ON b.id = s.book_id
      JOIN users u ON u.id = s.submitted_by
      LEFT JOIN users reviewer ON reviewer.id = s.reviewed_by
      WHERE s.id = $1`, [requireNumericId(req.params.id)]);
   if (!rows[0]) throw httpError(404, 'Submission not found.');
-  res.json({ submission: rows[0] });
+  assertSubmissionAccess(req, rows[0].submitted_by);
+  const { submitted_by: _submittedBy, ...submission } = rows[0];
+  res.json({ submission });
 }));
 
-router.post('/:id/evaluate', asyncRoute(async (req, res) => {
+async function getSubmissionForAi(req, id) {
   const { rows } = await pool.query(
-    `SELECT id, student_name, image_bytes, image_mime, standard_snapshot, status
-     FROM submissions WHERE id = $1`, [requireNumericId(req.params.id)]);
+    `SELECT id, student_name, image_bytes, image_mime, standard_snapshot, status, submitted_by
+     FROM submissions WHERE id = $1`, [requireNumericId(id)]);
   const submission = rows[0];
   if (!submission) throw httpError(404, 'Submission not found.');
-  if (submission.status === 'reviewed' && req.body.force !== true) {
+  assertSubmissionAccess(req, submission.submitted_by);
+  if (submission.status === 'reviewed') {
     throw httpError(409, 'This submission has a final teacher decision. Reopen it before running AI again.');
   }
+  return submission;
+}
 
+function aiFeedback(assessment) {
+  return `${assessment.overallFeedback || ''}${assessment.uncertaintyNotes ? `\n\nNotes: ${assessment.uncertaintyNotes}` : ''}`.trim();
+}
+
+// Step 1: OCR/transcription only. Faculty can correct this text before grading.
+router.post('/:id/transcribe', asyncRoute(async (req, res) => {
+  const submission = await getSubmissionForAi(req, req.params.id);
+  const transcription = await transcribeHandwriting({
+    imageBytes: submission.image_bytes,
+    mimeType: submission.image_mime,
+  });
+  const { rows } = await pool.query(
+    `UPDATE submissions SET extracted_text = $1, detected_language = $2,
+       updated_at = NOW() WHERE id = $3
+     RETURNING id, extracted_text, detected_language, status`,
+    [transcription.extractedText, transcription.detectedLanguage, submission.id],
+  );
+  res.json({ submission: rows[0], uncertaintyNotes: transcription.uncertaintyNotes, model: transcription.model,
+    message: 'Transcription ready. Correct it against the photo, then ask AI to suggest marks.' });
+}));
+
+// Step 2: rubric evaluation uses the faculty-corrected transcription supplied by the client.
+router.post('/:id/grade', asyncRoute(async (req, res) => {
+  const submission = await getSubmissionForAi(req, req.params.id);
+  const extractedText = typeof req.body.extractedText === 'string' ? req.body.extractedText.trim() : '';
+  if (!extractedText) throw httpError(400, 'Transcribe or correct the student text before asking AI to suggest marks.');
+  if (extractedText.length > 30000) throw httpError(400, 'The corrected transcription is too long.');
+  const assessment = await gradeTranscription({
+    extractedText,
+    rubric: submission.standard_snapshot,
+    studentName: submission.student_name,
+  });
+  const { rows } = await pool.query(
+    `UPDATE submissions SET extracted_text = $1, ai_score = $2, ai_feedback = $3,
+       ai_criteria = $4::jsonb, status = 'ai_reviewed', updated_at = NOW()
+     WHERE id = $5
+     RETURNING id, extracted_text, ai_score, ai_feedback, ai_criteria, status`,
+    [extractedText, assessment.totalScore, aiFeedback(assessment), JSON.stringify(assessment.criteria), submission.id],
+  );
+  res.json({ submission: rows[0], model: assessment.model,
+    message: 'Marks suggested from the corrected transcription. Verify the result before saving a final decision.' });
+}));
+
+// Preserve the previous endpoint for any older client: transcribe and grade in one request.
+router.post('/:id/evaluate', asyncRoute(async (req, res) => {
+  const submission = await getSubmissionForAi(req, req.params.id);
   const assessment = await evaluateHandwriting({
     imageBytes: submission.image_bytes,
     mimeType: submission.image_mime,
     rubric: submission.standard_snapshot,
     studentName: submission.student_name,
   });
-  const { rows: updatedRows } = await pool.query(
+  const { rows } = await pool.query(
     `UPDATE submissions SET extracted_text = $1, detected_language = $2, ai_score = $3,
-       ai_feedback = $4, ai_criteria = $5::jsonb, status = 'ai_reviewed',
-       updated_at = NOW() WHERE id = $6
+       ai_feedback = $4, ai_criteria = $5::jsonb, status = 'ai_reviewed', updated_at = NOW()
+     WHERE id = $6
      RETURNING id, extracted_text, detected_language, ai_score, ai_feedback, ai_criteria, status`,
-    [assessment.extractedText, assessment.detectedLanguage, assessment.totalScore,
-      `${assessment.overallFeedback}${assessment.uncertaintyNotes ? `\n\nReading notes: ${assessment.uncertaintyNotes}` : ''}`,
+    [assessment.extractedText, assessment.detectedLanguage, assessment.totalScore, aiFeedback(assessment),
       JSON.stringify(assessment.criteria), submission.id],
   );
-  res.json({ submission: updatedRows[0], model: assessment.model, message: 'AI suggestions are ready. Please verify the text and marks before saving a final decision.' });
+  res.json({ submission: rows[0], model: assessment.model,
+    message: 'AI suggestions are ready. Please verify the text and marks before saving a final decision.' });
 }));
 
 router.patch('/:id/final', asyncRoute(async (req, res) => {
@@ -178,9 +244,10 @@ router.patch('/:id/final', asyncRoute(async (req, res) => {
   const finalCriteria = Array.isArray(req.body.finalCriteria) ? req.body.finalCriteria : [];
   const finalScoreRaw = Number(req.body.finalScore);
   const { rows: existingRows } = await pool.query(
-    'SELECT id, standard_snapshot, status FROM submissions WHERE id = $1', [requireNumericId(req.params.id)]);
+    'SELECT id, standard_snapshot, status, submitted_by FROM submissions WHERE id = $1', [requireNumericId(req.params.id)]);
   const existing = existingRows[0];
   if (!existing) throw httpError(404, 'Submission not found.');
+  assertSubmissionAccess(req, existing.submitted_by);
 
   const totalMarks = Number(existing.standard_snapshot.totalMarks ?? existing.standard_snapshot.total_marks);
   if (!Number.isFinite(finalScoreRaw) || finalScoreRaw < 0 || finalScoreRaw > totalMarks) {

@@ -11,6 +11,8 @@ import {
 import toast from 'react-hot-toast';
 import { api, jsonBody } from '../api.js';
 import Loading from '../components/Loading.jsx';
+import ErrorState from '../components/ErrorState.jsx';
+import ConfirmDialog from '../components/ConfirmDialog.jsx';
 
 const emptyForm = {
   name: '',
@@ -22,6 +24,8 @@ const emptyForm = {
 export default function TeamPage() {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [deleteCandidate, setDeleteCandidate] = useState(null);
   const [saving, setSaving] = useState(false);
 
   // busy holds something like "12:delete" while a request is running,
@@ -39,8 +43,9 @@ export default function TeamPage() {
     try {
       const result = await api('/users');
       setUsers(result.users || []);
+      setLoadError('');
     } catch (error) {
-      toast.error(error.message || 'Could not load accounts.');
+      setLoadError(error.message || 'Could not load accounts.');
     } finally {
       setLoading(false);
     }
@@ -158,14 +163,14 @@ export default function TeamPage() {
   }
 
   // Permanently delete a faculty account (the server refuses if it has records).
-  async function deleteUser(user) {
+  function deleteUser(user) {
     if (busy !== null) return;
+    setDeleteCandidate(user);
+  }
 
-    const confirmed = window.confirm(
-      `Permanently delete ${user.name} (@${user.username})?\n\nThis cannot be undone. If the account has any saved work or records, it cannot be deleted and you should deactivate it instead.`
-    );
-
-    if (!confirmed) return;
+  async function confirmDeleteUser() {
+    const user = deleteCandidate;
+    if (!user || busy !== null) return;
 
     setBusy(`${user.id}:delete`);
 
@@ -180,6 +185,7 @@ export default function TeamPage() {
       if (resetUserId === user.id) setResetUserId(null);
 
       toast.success('Faculty account deleted.');
+      setDeleteCandidate(null);
     } catch (error) {
       toast.error(error.message || 'Could not delete the account.');
     } finally {
@@ -189,6 +195,10 @@ export default function TeamPage() {
 
   if (loading) {
     return <Loading label="Loading accounts…" />;
+  }
+
+  if (loadError) {
+    return <ErrorState title="Could not load faculty accounts" message={loadError} onRetry={() => { setLoading(true); loadUsers(); }} />;
   }
 
   return (
@@ -252,7 +262,7 @@ export default function TeamPage() {
               autoComplete="off"
             />
 
-            <p className="mt-1 text-xs text-slate-400">
+            <p className="mt-1 text-xs text-slate-600">
               Letters and numbers only. No spaces or special characters.
             </p>
           </div>
@@ -294,7 +304,7 @@ export default function TeamPage() {
               autoComplete="new-password"
             />
 
-            <p className="mt-1 text-xs text-slate-400">
+            <p className="mt-1 text-xs text-slate-600">
               Share the password privately with the faculty member.
             </p>
           </div>
@@ -375,7 +385,7 @@ export default function TeamPage() {
                       </p>
 
                       <div className="mt-1 flex items-center gap-2">
-                        <span className="text-xs capitalize text-slate-400">
+                        <span className="text-xs capitalize text-slate-600">
                           {user.role}
                         </span>
 
@@ -510,6 +520,15 @@ export default function TeamPage() {
           </div>
         )}
       </section>
+      <ConfirmDialog
+        open={Boolean(deleteCandidate)}
+        title="Delete faculty account?"
+        description={deleteCandidate ? `Permanently delete ${deleteCandidate.name} (@${deleteCandidate.username})?\n\nThis cannot be undone. If the account has saved work or records, it cannot be deleted; deactivate it instead.` : ''}
+        confirmLabel="Delete account"
+        busy={Boolean(busy && busy.endsWith(':delete'))}
+        onClose={() => setDeleteCandidate(null)}
+        onConfirm={confirmDeleteUser}
+      />
     </div>
   );
 }

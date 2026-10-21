@@ -29,6 +29,14 @@ app.use('/api/auth/login', rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, stan
 app.use('/api/auth', authRoutes);
 app.use('/api/work', workRoutes);
 app.use('/api/books', bookRoutes);
+// AI evaluations make an external API call, so limit repeated attempts per IP.
+app.use(['/api/submissions/:id/evaluate', '/api/submissions/:id/transcribe', '/api/submissions/:id/grade'], rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Too many AI review attempts. Please wait 15 minutes before trying again.' },
+}));
 app.use('/api/submissions', submissionRoutes);
 app.use('/api/users', userRoutes);
 

@@ -46,7 +46,7 @@ export default function DashboardPage() {
     </section>
 
     <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-      {stats.map((item) => { const Icon = item.icon; return <Link to={item.href || '/'} key={item.label} className="card transition hover:-translate-y-0.5 hover:border-slate-300"><div className="flex items-start justify-between"><span className={`flex h-10 w-10 items-center justify-center rounded-xl ${tone[item.tone]}`}><Icon size={19} /></span><ArrowRight size={16} className="text-slate-300" /></div><p className="mt-5 text-sm font-medium text-slate-500">{item.label}</p><p className="mt-1 text-3xl font-extrabold tracking-tight text-slate-900">{item.value}</p><p className="mt-1 text-xs text-slate-400">{item.note}</p></Link>; })}
+      {stats.map((item) => { const Icon = item.icon; return <Link to={item.href || '/'} key={item.label} className="card transition hover:-translate-y-0.5 hover:border-slate-300"><div className="flex items-start justify-between"><span className={`flex h-10 w-10 items-center justify-center rounded-xl ${tone[item.tone]}`}><Icon size={19} /></span><ArrowRight size={16} className="text-slate-300" /></div><p className="mt-5 text-sm font-medium text-slate-500">{item.label}</p><p className="mt-1 text-3xl font-extrabold tracking-tight text-slate-900">{item.value}</p><p className="mt-1 text-xs text-slate-500">{item.note}</p></Link>; })}
     </section>
 
     <section className="grid gap-5 xl:grid-cols-2">
@@ -59,10 +59,10 @@ export default function DashboardPage() {
         {data.submissions.length === 0 ? <Empty text="No handwritten summaries uploaded yet." link="/books" label="Browse books" /> : <div className="divide-y divide-slate-100">{data.submissions.slice(0, 4).map((item) => <div key={item.id} className="flex items-center justify-between gap-3 py-3"><div className="min-w-0"><p className="truncate text-sm font-bold">{item.student_name}</p><p className="mt-1 truncate text-xs text-slate-500">{item.book_title} · {dateLabel(item.created_at)}</p></div><StatusBadge status={item.status} /></div>)}</div>}
       </div>
     </section>
-    <p className="text-xs leading-5 text-slate-400">AI-generated marks are suggestions only. Teachers should verify the extracted handwriting and save the final assessment.</p>
+    <p className="text-xs leading-5 text-slate-600">AI-generated marks are suggestions only. Teachers should verify the extracted handwriting and save the final assessment.</p>
   </div>;
 }
 
 function Empty({ text, link, label }) {
-  return <div className="rounded-xl bg-paper px-4 py-8 text-center"><p className="text-sm text-slate-500">{text}</p><Link to={link} className="mt-3 inline-flex items-center gap-1 text-sm font-bold text-forest">{label} <ArrowRight size={14} /></Link></div>;
+  return <div className="rounded-xl bg-paper px-4 py-8 text-center"><p className="text-sm text-slate-600">{text}</p><Link to={link} className="mt-3 inline-flex items-center gap-1 text-sm font-bold text-forest">{label} <ArrowRight size={14} /></Link></div>;
 }

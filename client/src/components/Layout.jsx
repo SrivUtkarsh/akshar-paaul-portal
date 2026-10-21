@@ -50,7 +50,7 @@ export default function Layout() {
           </div>
         </NavLink>
 
-        <div className="hidden px-6 pb-2 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400 md:block">
+        <div className="hidden px-6 pb-2 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500 md:block">
           Workspace
         </div>
 

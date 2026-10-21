@@ -5,7 +5,7 @@
 
 :root {
   font-family: Inter, ui-sans-serif, system-ui, -apple-system,
-    BlinkMacSystemFont, "Segoe UI", sans-serif;
+    BlinkMacSystemFont, "Segoe UI", "Noto Sans Devanagari", "Noto Sans Marathi", sans-serif;
   color: #1f2933;
   background: #f7f7f2;
   font-synthesis: none;
@@ -60,15 +60,20 @@ img {
 }
 
 :focus-visible {
-  outline: 3px solid rgba(36, 91, 72, 0.38);
+  outline: 3px solid #245b48;
   outline-offset: 3px;
+}
+
+.bg-forest :focus-visible,
+.bg-forest:focus-visible {
+  outline-color: #ffffff;
 }
 
 @layer components {
   .field {
-    @apply w-full rounded-xl border border-slate-200 bg-white
+    @apply w-full rounded-xl border border-control bg-white
       px-3.5 py-3 text-sm text-slate-800
-      placeholder:text-slate-400
+      placeholder:text-slate-500
       transition-colors duration-150
       focus:border-forest focus:ring-2 focus:ring-forest/10;
   }
@@ -111,7 +116,7 @@ img {
   }
 
   .muted {
-    @apply text-sm leading-6 text-slate-500;
+    @apply text-sm leading-6 text-slate-600;
   }
 }
 
