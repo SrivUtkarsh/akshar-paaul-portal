@@ -107,3 +107,7 @@ CREATE INDEX IF NOT EXISTS idx_work_faculty_date ON faculty_work(faculty_id, wor
 CREATE INDEX IF NOT EXISTS idx_books_creator ON books(created_by, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_submissions_book_date ON submissions(book_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_submissions_status ON submissions(status, created_at DESC);
+
+-- Usernames are compared case-insensitively at login, so enforce that in the database too.
+-- (The app always saves usernames in lowercase, so this is safe to add to an existing database.)
+CREATE UNIQUE INDEX IF NOT EXISTS users_username_lower_idx ON users (LOWER(username));
