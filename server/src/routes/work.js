@@ -6,6 +6,19 @@ import { asyncRoute, httpError } from '../utils.js';
 const router = Router();
 router.use(requireAuth);
 
+function requireNumericId(value) {
+  if (!/^\d+$/.test(String(value)) || !Number.isSafeInteger(Number(value)) || Number(value) < 1) {
+    throw httpError(400, 'Invalid ID.');
+  }
+  return Number(value);
+}
+
+function isValidDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
 // Admins see all activities; faculty see only the records they submitted.
 router.get('/', asyncRoute(async (req, res) => {
   const status = String(req.query.status || '').trim();
@@ -34,6 +47,7 @@ router.post('/', requireRole('faculty'), asyncRoute(async (req, res) => {
   const workDate = String(req.body.workDate || '').trim();
   if (!title || !details || !workDate) throw httpError(400, 'Add a title, date, and activity details.');
   if (title.length > 180 || details.length > 12000) throw httpError(400, 'The title or activity details are too long.');
+  if (!isValidDate(workDate)) throw httpError(400, 'Enter a valid activity date.');
 
   const { rows } = await pool.query(
     `INSERT INTO faculty_work (faculty_id, work_date, title, details)
@@ -44,7 +58,7 @@ router.post('/', requireRole('faculty'), asyncRoute(async (req, res) => {
 }));
 
 router.patch('/:id', requireRole('faculty'), asyncRoute(async (req, res) => {
-  const id = Number(req.params.id);
+  const id = requireNumericId(req.params.id);
   const { rows: existingRows } = await pool.query('SELECT * FROM faculty_work WHERE id = $1', [id]);
   const existing = existingRows[0];
   if (!existing || existing.faculty_id !== req.user.id) throw httpError(404, 'Activity not found.');
@@ -56,6 +70,8 @@ router.patch('/:id', requireRole('faculty'), asyncRoute(async (req, res) => {
   const details = String(req.body.details || '').trim();
   const workDate = String(req.body.workDate || '').trim();
   if (!title || !details || !workDate) throw httpError(400, 'Add a title, date, and activity details.');
+  if (title.length > 180 || details.length > 12000) throw httpError(400, 'The title or activity details are too long.');
+  if (!isValidDate(workDate)) throw httpError(400, 'Enter a valid activity date.');
 
   // Preserve the previous version before saving the faculty member's revision.
   await pool.query(
@@ -73,7 +89,7 @@ router.patch('/:id', requireRole('faculty'), asyncRoute(async (req, res) => {
 }));
 
 router.post('/:id/review', requireRole('admin'), asyncRoute(async (req, res) => {
-  const id = Number(req.params.id);
+  const id = requireNumericId(req.params.id);
   const action = String(req.body.action || '');
   const feedback = String(req.body.feedback || '').trim();
   if (!['approved', 'changes_requested'].includes(action)) {
@@ -107,7 +123,7 @@ router.post('/:id/review', requireRole('admin'), asyncRoute(async (req, res) => 
 }));
 
 router.get('/:id/history', asyncRoute(async (req, res) => {
-  const id = Number(req.params.id);
+  const id = requireNumericId(req.params.id);
   const { rows: workRows } = await pool.query('SELECT faculty_id FROM faculty_work WHERE id = $1', [id]);
   if (!workRows[0] || (req.user.role !== 'admin' && workRows[0].faculty_id !== req.user.id)) {
     throw httpError(404, 'Activity not found.');

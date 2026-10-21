@@ -6,6 +6,13 @@ import { asyncRoute, httpError } from '../utils.js';
 const router = Router();
 router.use(requireAuth);
 
+function requireNumericId(value) {
+  if (!/^\d+$/.test(String(value)) || !Number.isSafeInteger(Number(value)) || Number(value) < 1) {
+    throw httpError(400, 'Invalid ID.');
+  }
+  return Number(value);
+}
+
 router.get('/', asyncRoute(async (_req, res) => {
   const { rows } = await pool.query(
     `SELECT b.*, u.name AS creator_name,
@@ -24,6 +31,7 @@ router.post('/', requireRole('admin', 'faculty'), asyncRoute(async (req, res) =>
   const description = String(req.body.description || '').trim();
   if (!title) throw httpError(400, 'Enter the book title.');
   if (title.length > 220 || author.length > 180) throw httpError(400, 'The title or author is too long.');
+  if (description.length > 12000) throw httpError(400, 'The book description is too long.');
   const { rows } = await pool.query(
     `INSERT INTO books (title, author, description, created_by)
      VALUES ($1, $2, $3, $4) RETURNING *`,
@@ -32,21 +40,40 @@ router.post('/', requireRole('admin', 'faculty'), asyncRoute(async (req, res) =>
   res.status(201).json({ book: rows[0] });
 }));
 
+router.patch('/:id', requireRole('admin', 'faculty'), asyncRoute(async (req, res) => {
+  const id = requireNumericId(req.params.id);
+  const title = String(req.body.title || '').trim();
+  const author = String(req.body.author || '').trim();
+  const description = String(req.body.description || '').trim();
+  if (!title) throw httpError(400, 'Enter the book title.');
+  if (title.length > 220 || author.length > 180) throw httpError(400, 'The title or author is too long.');
+  if (description.length > 12000) throw httpError(400, 'The book description is too long.');
+
+  const { rows } = await pool.query(
+    `UPDATE books SET title = $1, author = $2, description = $3, updated_at = NOW()
+     WHERE id = $4 RETURNING *`,
+    [title, author, description, id],
+  );
+  if (!rows[0]) throw httpError(404, 'Book not found.');
+  res.json({ book: rows[0] });
+}));
+
 router.get('/:id', asyncRoute(async (req, res) => {
+  const id = requireNumericId(req.params.id);
   const { rows } = await pool.query(
     `SELECT b.*, u.name AS creator_name,
        (SELECT jsonb_build_object('id', gs.id, 'name', gs.name, 'description', gs.description,
           'version', gs.version, 'total_marks', gs.total_marks, 'criteria', gs.criteria, 'created_at', gs.created_at)
         FROM grading_standards gs WHERE gs.book_id = b.id ORDER BY gs.version DESC LIMIT 1) AS latest_standard
      FROM books b JOIN users u ON u.id = b.created_by WHERE b.id = $1`,
-    [req.params.id],
+    [id],
   );
   if (!rows[0]) throw httpError(404, 'Book not found.');
   res.json({ book: rows[0] });
 }));
 
 router.post('/:id/standards', requireRole('admin', 'faculty'), asyncRoute(async (req, res) => {
-  const bookId = Number(req.params.id);
+  const bookId = requireNumericId(req.params.id);
   const bookResult = await pool.query('SELECT id, created_by FROM books WHERE id = $1', [bookId]);
   const book = bookResult.rows[0];
   if (!book) throw httpError(404, 'Book not found.');
@@ -59,6 +86,8 @@ router.post('/:id/standards', requireRole('admin', 'faculty'), asyncRoute(async 
   if (!name || criteria.length < 1 || criteria.length > 20) {
     throw httpError(400, 'Add a standard name and between 1 and 20 criteria.');
   }
+  if (name.length > 180) throw httpError(400, 'The standard name must be 180 characters or fewer.');
+  if (description.length > 12000) throw httpError(400, 'The standard description is too long.');
   const normalizedCriteria = criteria.map((item, index) => {
     const criterionName = String(item.name || '').trim();
     const criterionDescription = String(item.description || '').trim();
@@ -66,8 +95,14 @@ router.post('/:id/standards', requireRole('admin', 'faculty'), asyncRoute(async 
     if (!criterionName || !Number.isFinite(maxMarks) || maxMarks <= 0 || maxMarks > 1000) {
       throw httpError(400, `Criterion ${index + 1} needs a name and a positive maximum mark.`);
     }
+    if (criterionName.length > 180) throw httpError(400, `Criterion ${index + 1} name must be 180 characters or fewer.`);
+    if (criterionDescription.length > 2000) throw httpError(400, `Criterion ${index + 1} description must be 2000 characters or fewer.`);
     return { name: criterionName, description: criterionDescription, maxMarks: Math.round(maxMarks * 100) / 100 };
   });
+  const criterionNames = normalizedCriteria.map((item) => item.name.toLocaleLowerCase());
+  if (new Set(criterionNames).size !== criterionNames.length) {
+    throw httpError(400, 'Criterion names must be unique within a grading standard.');
+  }
   const totalMarks = normalizedCriteria.reduce((sum, item) => sum + item.maxMarks, 0);
 
   // Serialize version assignment by locking the book row to avoid duplicate versions.

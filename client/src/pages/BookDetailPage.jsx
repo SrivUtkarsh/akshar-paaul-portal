@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, BookOpenText, FileImage, Plus, Trash2, Upload } from 'lucide-react';
+import { ArrowLeft, BookOpenText, FileImage, Pencil, Plus, Trash2, Upload } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api, jsonBody } from '../api.js';
 import Loading from '../components/Loading.jsx';
@@ -17,6 +17,9 @@ export default function BookDetailPage() {
   const [book, setBook] = useState(null);
   const [submissions, setSubmissions] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [editingBook, setEditingBook] = useState(false);
+  const [savingBook, setSavingBook] = useState(false);
+  const [bookForm, setBookForm] = useState({ title: '', author: '', description: '' });
   const [standardForm, setStandardForm] = useState({ name: 'Book summary rubric', description: 'Reusable rubric for this book.', criteria: defaultCriteria() });
   const [showStandard, setShowStandard] = useState(false);
   const [savingStandard, setSavingStandard] = useState(false);
@@ -35,6 +38,22 @@ export default function BookDetailPage() {
     finally { setLoading(false); }
   }
   useEffect(() => { load(); }, [bookId]);
+
+  async function saveBook(event) {
+    event.preventDefault();
+    setSavingBook(true);
+    try {
+      const result = await api(`/books/${bookId}`, { method: 'PATCH', body: jsonBody(bookForm) });
+      setBook(result.book);
+      setEditingBook(false);
+      toast.success('Book details updated.');
+      await load();
+    } catch (error) {
+      toast.error(error.message);
+    } finally {
+      setSavingBook(false);
+    }
+  }
 
   async function saveStandard(event) {
     event.preventDefault(); setSavingStandard(true);
@@ -87,14 +106,16 @@ export default function BookDetailPage() {
 
   return <div className="space-y-6">
     <Link to="/books" className="inline-flex items-center gap-2 text-sm font-bold text-slate-500 hover:text-forest"><ArrowLeft size={16} /> Back to books</Link>
-    <section className="card"><div className="flex items-start gap-4"><div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-forest/10 text-forest"><BookOpenText size={25} /></div><div className="min-w-0 flex-1"><h2 className="text-2xl font-extrabold tracking-tight">{book.title}</h2><p className="mt-1 text-sm text-slate-500">{book.author || 'Author not specified'} · Created by {book.creator_name}</p>{book.description && <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">{book.description}</p>}</div></div></section>
+    <section className="card">
+      {!editingBook ? <div className="flex items-start gap-4"><div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-forest/10 text-forest"><BookOpenText size={25} /></div><div className="min-w-0 flex-1"><h2 className="text-2xl font-extrabold tracking-tight">{book.title}</h2><p className="mt-1 text-sm text-slate-500">{book.author || 'Author not specified'} · Created by {book.creator_name}</p>{book.description && <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">{book.description}</p>}</div><button type="button" className="btn-secondary shrink-0" onClick={() => { setBookForm({ title: book.title || '', author: book.author || '', description: book.description || '' }); setEditingBook(true); }}><Pencil size={15} /> Edit book</button></div> : <form onSubmit={saveBook} className="space-y-4"><div><h2 className="section-title">Edit book details</h2><p className="muted mt-1">Update the title, author, or description. Existing grading standards and submissions will be preserved.</p></div><div className="grid gap-4 md:grid-cols-2"><div><label className="label">Book title</label><input className="field" maxLength="220" value={bookForm.title} onChange={(e) => setBookForm({ ...bookForm, title: e.target.value })} required /></div><div><label className="label">Author</label><input className="field" maxLength="180" value={bookForm.author} onChange={(e) => setBookForm({ ...bookForm, author: e.target.value })} /></div><div className="md:col-span-2"><label className="label">Description / note</label><textarea className="field min-h-20" maxLength="12000" value={bookForm.description} onChange={(e) => setBookForm({ ...bookForm, description: e.target.value })} /></div></div><div className="flex flex-wrap gap-2"><button className="btn-primary" disabled={savingBook}>{savingBook ? 'Saving…' : 'Save changes'}</button><button type="button" className="btn-secondary" onClick={() => setEditingBook(false)}>Cancel</button></div></form>}
+    </section>
 
     <section className="card">
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start"><div><h3 className="section-title">Grading standard</h3><p className="muted mt-1">Reusable criteria keep evaluations consistent. Saving changes creates a new version.</p></div><button className="btn-primary" onClick={() => { setStandardForm(currentStandard ? { name: currentStandard.name, description: currentStandard.description || '', criteria: currentStandard.criteria.map((c) => ({ ...c, maxMarks: Number(c.maxMarks ?? c.max_marks) })) } : { name: 'Book summary rubric', description: '', criteria: defaultCriteria() }); setShowStandard(!showStandard); }}><Plus size={16} /> {currentStandard ? 'Create new version' : 'Set grading standard'}</button></div>
       {currentStandard && <div className="mt-5 rounded-xl bg-paper p-4"><div className="flex flex-wrap items-start justify-between gap-2"><div><p className="text-sm font-extrabold">{currentStandard.name} <span className="ml-1 text-xs font-bold text-forest">v{currentStandard.version}</span></p><p className="mt-1 text-sm text-slate-500">{currentStandard.description || 'No description.'}</p></div><p className="text-lg font-extrabold text-forest">{currentStandard.total_marks} marks</p></div><div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{currentStandard.criteria.map((criterion, index) => <div key={`${criterion.name}-${index}`} className="rounded-lg border border-slate-200 bg-white p-3"><div className="flex justify-between gap-2"><p className="text-sm font-bold">{criterion.name}</p><p className="shrink-0 text-sm font-extrabold">{criterion.maxMarks ?? criterion.max_marks}</p></div>{criterion.description && <p className="mt-1 text-xs leading-5 text-slate-500">{criterion.description}</p>}</div>)}</div></div>}
       {!currentStandard && <p className="mt-5 rounded-xl bg-amber-50 p-4 text-sm leading-6 text-amber-900">This book needs a grading standard before student pages can be uploaded. Add the criteria teachers want the AI to consider.</p>}
-      {showStandard && <form onSubmit={saveStandard} className="mt-5 space-y-4 border-t border-slate-100 pt-5"><div className="grid gap-4 md:grid-cols-2"><div><label className="label">Standard name</label><input className="field" value={standardForm.name} onChange={(e) => setStandardForm({ ...standardForm, name: e.target.value })} required /></div><div><label className="label">Total marks</label><div className="field flex items-center justify-between bg-slate-50 font-extrabold">{totalMarks}<span className="text-xs font-medium text-slate-400">auto-calculated</span></div></div><div className="md:col-span-2"><label className="label">Instructions for the evaluator (optional)</label><textarea className="field min-h-20" value={standardForm.description} onChange={(e) => setStandardForm({ ...standardForm, description: e.target.value })} placeholder="What matters most in this book's summary?" /></div></div>
-        <div className="space-y-3">{standardForm.criteria.map((criterion, index) => <div key={index} className="rounded-xl border border-slate-200 p-4"><div className="mb-3 flex items-center justify-between"><p className="text-sm font-bold">Criterion {index + 1}</p><button type="button" onClick={() => removeCriterion(index)} className="rounded-lg p-2 text-slate-400 hover:bg-rose-50 hover:text-rose-600" aria-label="Remove criterion"><Trash2 size={16} /></button></div><div className="grid gap-3 md:grid-cols-[1fr_140px]"><div><label className="label">Criterion name</label><input className="field" value={criterion.name} onChange={(e) => changeCriterion(index, 'name', e.target.value)} required placeholder="e.g. Main ideas" /></div><div><label className="label">Maximum marks</label><input className="field" type="number" min="0.5" max="1000" step="0.5" value={criterion.maxMarks} onChange={(e) => changeCriterion(index, 'maxMarks', e.target.value)} required /></div><div className="md:col-span-2"><label className="label">What should the teacher look for?</label><textarea className="field min-h-16" value={criterion.description} onChange={(e) => changeCriterion(index, 'description', e.target.value)} placeholder="Describe what a good answer includes" /></div></div></div>)}</div>
+      {showStandard && <form onSubmit={saveStandard} className="mt-5 space-y-4 border-t border-slate-100 pt-5"><div className="grid gap-4 md:grid-cols-2"><div><label className="label">Standard name</label><input className="field" maxLength="180" value={standardForm.name} onChange={(e) => setStandardForm({ ...standardForm, name: e.target.value })} required /></div><div><label className="label">Total marks</label><div className="field flex items-center justify-between bg-slate-50 font-extrabold">{totalMarks}<span className="text-xs font-medium text-slate-400">auto-calculated</span></div></div><div className="md:col-span-2"><label className="label">Instructions for the evaluator (optional)</label><textarea className="field min-h-20" maxLength="12000" value={standardForm.description} onChange={(e) => setStandardForm({ ...standardForm, description: e.target.value })} placeholder="What matters most in this book's summary?" /></div></div>
+        <div className="space-y-3">{standardForm.criteria.map((criterion, index) => <div key={index} className="rounded-xl border border-slate-200 p-4"><div className="mb-3 flex items-center justify-between"><p className="text-sm font-bold">Criterion {index + 1}</p><button type="button" onClick={() => removeCriterion(index)} className="rounded-lg p-2 text-slate-400 hover:bg-rose-50 hover:text-rose-600" aria-label="Remove criterion"><Trash2 size={16} /></button></div><div className="grid gap-3 md:grid-cols-[1fr_140px]"><div><label className="label">Criterion name</label><input className="field" maxLength="180" value={criterion.name} onChange={(e) => changeCriterion(index, 'name', e.target.value)} required placeholder="e.g. Main ideas" /></div><div><label className="label">Maximum marks</label><input className="field" type="number" min="0.5" max="1000" step="0.5" value={criterion.maxMarks} onChange={(e) => changeCriterion(index, 'maxMarks', e.target.value)} required /></div><div className="md:col-span-2"><label className="label">What should the teacher look for?</label><textarea className="field min-h-16" maxLength="2000" value={criterion.description} onChange={(e) => changeCriterion(index, 'description', e.target.value)} placeholder="Describe what a good answer includes" /></div></div></div>)}</div>
         <div className="flex flex-wrap justify-between gap-3"><button type="button" onClick={addCriterion} className="btn-secondary"><Plus size={15} /> Add criterion</button><div className="flex gap-2"><button type="button" className="btn-secondary" onClick={() => setShowStandard(false)}>Cancel</button><button className="btn-primary" disabled={savingStandard}>{savingStandard ? 'Saving…' : 'Save standard version'}</button></div></div>
       </form>}
     </section>

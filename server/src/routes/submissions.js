@@ -8,6 +8,13 @@ import { asyncRoute, httpError } from '../utils.js';
 const router = Router();
 router.use(requireAuth);
 
+function requireNumericId(value) {
+  if (!/^\d+$/.test(String(value)) || !Number.isSafeInteger(Number(value)) || Number(value) < 1) {
+    throw httpError(400, 'Invalid ID.');
+  }
+  return Number(value);
+}
+
 // Images are stored in PostgreSQL as BYTEA, not on the server's local disk.
 // That makes uploads compatible with short-lived Vercel functions and avoids
 // leaving student photos in an unprotected public uploads folder.
@@ -71,7 +78,7 @@ router.get('/', asyncRoute(async (req, res) => {
 }));
 
 router.post('/for-book/:bookId', upload.single('image'), asyncRoute(async (req, res) => {
-  const bookId = Number(req.params.bookId);
+  const bookId = requireNumericId(req.params.bookId);
   const studentName = String(req.body.studentName || '').trim();
   const studentClass = String(req.body.studentClass || '').trim();
   const studentSection = String(req.body.studentSection || '').trim();
@@ -109,7 +116,7 @@ router.post('/for-book/:bookId', upload.single('image'), asyncRoute(async (req, 
 
 router.get('/:id/image', asyncRoute(async (req, res) => {
   const { rows } = await pool.query(
-    'SELECT image_bytes, image_mime, image_filename FROM submissions WHERE id = $1', [req.params.id]);
+    'SELECT image_bytes, image_mime, image_filename FROM submissions WHERE id = $1', [requireNumericId(req.params.id)]);
   if (!rows[0]) throw httpError(404, 'Submission not found.');
   // No public cache: student pages are private school records.
   res.set({
@@ -132,7 +139,7 @@ router.get('/:id', asyncRoute(async (req, res) => {
      FROM submissions s JOIN books b ON b.id = s.book_id
      JOIN users u ON u.id = s.submitted_by
      LEFT JOIN users reviewer ON reviewer.id = s.reviewed_by
-     WHERE s.id = $1`, [req.params.id]);
+     WHERE s.id = $1`, [requireNumericId(req.params.id)]);
   if (!rows[0]) throw httpError(404, 'Submission not found.');
   res.json({ submission: rows[0] });
 }));
@@ -140,7 +147,7 @@ router.get('/:id', asyncRoute(async (req, res) => {
 router.post('/:id/evaluate', asyncRoute(async (req, res) => {
   const { rows } = await pool.query(
     `SELECT id, student_name, image_bytes, image_mime, standard_snapshot, status
-     FROM submissions WHERE id = $1`, [req.params.id]);
+     FROM submissions WHERE id = $1`, [requireNumericId(req.params.id)]);
   const submission = rows[0];
   if (!submission) throw httpError(404, 'Submission not found.');
   if (submission.status === 'reviewed' && req.body.force !== true) {
@@ -171,7 +178,7 @@ router.patch('/:id/final', asyncRoute(async (req, res) => {
   const finalCriteria = Array.isArray(req.body.finalCriteria) ? req.body.finalCriteria : [];
   const finalScoreRaw = Number(req.body.finalScore);
   const { rows: existingRows } = await pool.query(
-    'SELECT id, standard_snapshot, status FROM submissions WHERE id = $1', [req.params.id]);
+    'SELECT id, standard_snapshot, status FROM submissions WHERE id = $1', [requireNumericId(req.params.id)]);
   const existing = existingRows[0];
   if (!existing) throw httpError(404, 'Submission not found.');
 
