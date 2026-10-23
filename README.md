@@ -74,6 +74,16 @@ Edit `server/.env` and set:
 
 The database URL is already set for the included Docker Compose configuration. If you use an existing database, update `DATABASE_URL`.
 
+### Optional: configure the frontend API URL
+
+The frontend defaults to `http://localhost:4000/api`, so you only need this file if your API runs at a different address. Create `client/.env` with:
+
+```env
+VITE_API_URL=http://localhost:4000/api
+```
+
+Replace the value with your API origin plus `/api` if needed. Restart the frontend dev server after changing this value. Do not put secrets such as `JWT_SECRET` or `GROQ_API_KEY` in this file; Vite variables are included in the browser bundle.
+
 ### 4. Create tables and first administrator
 
 ```bash
@@ -119,6 +129,7 @@ Sign in with the `ADMIN_USERNAME` and `ADMIN_PASSWORD` you set in `server/.env`.
 | `GROQ_API_KEY` | Private key for Groq requests; server only |
 | `GROQ_VISION_MODEL` | Configurable Groq model ID supporting images |
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | Initial administrator seed credentials |
+| `VITE_API_URL` | Frontend API origin plus `/api` (optional; defaults to `http://localhost:4000/api`, set in `client/.env`) |
 
 Never add real API keys, database passwords, or production JWT secrets to Git. Never place `GROQ_API_KEY` in a `VITE_` frontend variable.
 
